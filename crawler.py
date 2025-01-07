@@ -3,15 +3,19 @@ import requests
 import logging
 import json
 import os
+import time
+import random
+import re
 from bs4 import BeautifulSoup
 import pika
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any 
 from proxy_manager import ProxyManager
 from config import (
-    RABBITMQ_HOST, QUEUE_NAME, DEFAULT_TIMEOUT,
+    RABBITMQ_HOST, QUEUE_NAME, DEFAULT_TIMEOUT, USER_AGENTS,
     GOOGLE_SCHOLAR_SELECTORS, DBLP_SELECTORS,
-    ERROR_RATE_LIMIT, ERROR_IP_BLOCKED
+    ERROR_RATE_LIMIT, ERROR_IP_BLOCKED, ERROR_PARSING,
+    HEARTBEAT_INTERVAL
 )
 
 class Crawler:
@@ -31,7 +35,7 @@ class Crawler:
         self.channel.queue_declare(queue=QUEUE_NAME, durable=True)
         self.channel.basic_qos(prefetch_count=1)
 
-     def crawl(self, url: str, source: str) -> List[Dict[str, Any]]:
+    def crawl(self, url: str, source: str) -> List[Dict[str, Any]]:
         """Perform crawl with proxy rotation"""
         max_retries = 3
         retry_count = 0
@@ -44,7 +48,7 @@ class Crawler:
             try:
                 response = self.session.get(
                     url,
-                    proxies=proxies,  # This will be {'http': 'http://ip:port', 'https': 'http://ip:port'}
+                    proxies=proxies,
                     timeout=DEFAULT_TIMEOUT,
                     headers=self.get_headers()
                 )
@@ -53,13 +57,22 @@ class Crawler:
                 soup = BeautifulSoup(response.text, 'lxml')
                 if source == 'google':
                     return self.parse_google_scholar(soup)
-                return self.parse_dblp(soup)
+                elif source == 'dblp':
+                    return self.parse_dblp(soup)
+                else:
+                    raise ValueError(f"Unknown source: {source}")
 
             except requests.exceptions.RequestException as e:
                 retry_count += 1
-                proxy_str = proxies.get('http', '')  # Get the proxy string for marking blocked
+                proxy_str = proxies.get('http', '')
                 self.handle_request_error(e, proxy_str)
-                time.sleep(retry_count * 2)  # Exponential backoff
+                time.sleep(retry_count * 2)
+            except ValueError as e:
+                raise e
+            except Exception as e:
+                logging.error(f"Error during crawling: {e}")
+                retry_count += 1
+                time.sleep(retry_count * 2)
             finally:
                 if proxies and 'http' in proxies:
                     self.proxy_manager.release_proxy(proxies['http'])
@@ -79,16 +92,25 @@ class Crawler:
         for article in soup.select(GOOGLE_SCHOLAR_SELECTORS['article']):
             try:
                 title_elem = article.select_one(GOOGLE_SCHOLAR_SELECTORS['title'])
-                year_elem = article.select_one(GOOGLE_SCHOLAR_SELECTORS['year'])
+                
+                # Find the first element that matches the year pattern
+                year_elem = None
+                for element in article.descendants:
+                    if isinstance(element, str):
+                        match = re.search(GOOGLE_SCHOLAR_SELECTORS['year'], element)
+                        if match:
+                            year_elem = match
+                            break
                 
                 if title_elem:
                     publications.append({
                         'title': title_elem.text.strip(),
-                        'year': int(year_elem.text) if year_elem else None,
+                        'year': int(year_elem.group(0)) if year_elem else None,
                         'source': 'google'
                     })
             except Exception as e:
                 logging.error(f"Error parsing Google Scholar article: {e}")
+                raise Exception(f"{ERROR_PARSING}: {e}")
         return publications
 
     def parse_dblp(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
@@ -97,16 +119,25 @@ class Crawler:
         for article in soup.select(DBLP_SELECTORS['article']):
             try:
                 title_elem = article.select_one(DBLP_SELECTORS['title'])
-                year_elem = article.select_one(DBLP_SELECTORS['year'])
+
+                # Find the first element that matches the year pattern
+                year_elem = None
+                for element in article.descendants:
+                    if isinstance(element, str):
+                        match = re.search(DBLP_SELECTORS['year'], element)
+                        if match:
+                            year_elem = match
+                            break
                 
                 if title_elem:
                     publications.append({
                         'title': title_elem.text.strip(),
-                        'year': int(year_elem.text) if year_elem else None,
+                        'year': int(year_elem.group(0)) if year_elem else None,
                         'source': 'dblp'
                     })
             except Exception as e:
                 logging.error(f"Error parsing DBLP article: {e}")
+                raise Exception(f"{ERROR_PARSING}: {e}")
         return publications
 
     def handle_request_error(self, error: Exception, proxy: str) -> None:
@@ -138,28 +169,37 @@ class Crawler:
     def process_task(self, task: Dict[str, Any]) -> None:
         """Process a single crawling task"""
         try:
+            logging.info(f"Processing task for {task.get('author')} from {task.get('source')}")
             publications = self.crawl(task["url"], task["source"])
             
             result = {
                 "status": "success",
                 "task_data": task,
-                "publications": publications
+                "publications": publications,
+                "node_id": self.node_id
             }
+            logging.info(f"Successfully crawled {len(publications)} publications for {task.get('author')}")
             
         except Exception as e:
             result = {
                 "status": "error",
                 "task_data": task,
-                "error": str(e)
+                "error": str(e),
+                "node_id": self.node_id
             }
-            logging.error(f"Task error: {e}")
+            logging.error(f"Task error for {task.get('author')}: {e}")
         
-        self.channel.basic_publish(
-            exchange='',
-            routing_key=QUEUE_NAME,
-            body=json.dumps(result),
-            properties=pika.BasicProperties(delivery_mode=2)
-        )
+        # Ensure we're publishing the result
+        try:
+            self.channel.basic_publish(
+                exchange='',
+                routing_key=QUEUE_NAME,
+                body=json.dumps(result),
+                properties=pika.BasicProperties(delivery_mode=2)
+            )
+            logging.info(f"Published result for {task.get('author')}")
+        except Exception as e:
+            logging.error(f"Error publishing result: {e}")
 
     def run(self) -> None:
         """Main crawler loop"""
@@ -175,4 +215,31 @@ class Crawler:
         )
         
         logging.info(f"Crawler node {self.node_id} started")
-        self.channel.start_consuming()
+        
+        # Send heartbeats periodically
+        while True:
+            try:
+                self.send_heartbeat()
+                self.connection.process_data_events(time_limit=HEARTBEAT_INTERVAL)
+            except Exception as e:
+                logging.error(f"Error sending heartbeat or processing events: {e}")
+                # Attempt to reconnect or handle the error as needed
+                time.sleep(5)  # Wait for a bit before retrying
+                self.setup_rabbitmq()
+
+    def run_once(self) -> None:
+        """Run one iteration of the crawler loop"""
+        try:
+            self.send_heartbeat()
+            self.connection.process_data_events(time_limit=1)
+        except Exception as e:
+            logging.error(f"Error in crawler loop: {e}")
+
+    def cleanup(self) -> None:
+        """Cleanup resources"""
+        try:
+            if self.connection and not self.connection.is_closed:
+                self.connection.close()
+                logging.info(f"Crawler {self.node_id}: RabbitMQ connection closed")
+        except Exception as e:
+            logging.error(f"Error during crawler cleanup: {e}")

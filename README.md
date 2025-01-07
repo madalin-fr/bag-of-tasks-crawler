@@ -22,10 +22,7 @@ The system consists of several key components:
 ## Installation
 
 1. Clone the repository:
-```bash
-git clone <repository-url>
-cd academic-publication-crawler
-```
+
 
 2. Create and activate a virtual environment:
 ```bash
@@ -39,22 +36,58 @@ pip install -r requirements.txt
 ```
 
 4. Set up PostgreSQL database:
-```bash
-# Log into PostgreSQL as superuser
-psql -U postgres
+**Note:** These instructions are for the stable RabbitMQ 3.x release series (3.8 - 3.12). If you are using a pre-release version of RabbitMQ 4.x, consult the specific documentation for that version as there might be changes.
 
-# Run the setup script
-\i setup_db.sql
-```
+### Linux (Ubuntu/Debian)
 
-5. Set up RabbitMQ:
 ```bash
-# Install RabbitMQ (Ubuntu/Debian)
+# Install RabbitMQ
 sudo apt-get install rabbitmq-server
 
 # Start RabbitMQ service
 sudo systemctl start rabbitmq-server
+
+# Enable the management plugin (optional, but recommended)
+sudo rabbitmq-plugins enable rabbitmq_management
 ```
+
+### Windows
+
+1.  **Install Erlang:**
+    *   Download and install the latest Erlang/OTP release for Windows from [https://www.erlang.org/downloads](https://www.erlang.org/downloads).
+    *   Add the Erlang `bin` directory (e.g., `C:\Program Files\erl-<version>\bin`) to your system's `PATH` environment variable.
+
+2.  **Install RabbitMQ:**
+    *   Download and install the latest RabbitMQ server release for Windows from [https://www.rabbitmq.com/download.html](https://www.rabbitmq.com/download.html).
+    *   It's recommended to install RabbitMQ as a service (default option).
+
+3.  **Enable the Management Plugin:**
+    *   Open a **command prompt as administrator**.
+    *   Navigate to the RabbitMQ `sbin` directory (e.g., `C:\Program Files\RabbitMQ Server\rabbitmq_server-<version>\sbin`).
+    *   Run the following command:
+
+        ```bash
+        rabbitmq-plugins enable rabbitmq_management
+        ```
+
+4.  **Start the RabbitMQ Service:**
+
+    *   If installed as a service, it should be running. You can manage it via the Windows Services manager (search for "Services" in the Start menu).
+    *   To start/stop from the command line (as administrator):
+
+        ```bash
+        net start RabbitMQ  # To start
+        net stop RabbitMQ   # To stop
+        ```
+
+5.  **Access the Management Interface:**
+
+    *   Open your web browser and go to `http://localhost:15672/`.
+    *   Log in with the default credentials:
+        *   Username: `guest`
+        *   Password: `guest`
+    *   **Important:** Change the default `guest` user's password or create a new administrator user immediately for security reasons.
+
 
 6. Configure proxy list:
 Create a file named `ips.txt` in the project root with your proxy list in the following format:
@@ -191,7 +224,3 @@ rabbitmqctl list_connections
 2. Create a feature branch
 3. Make your changes
 4. Submit a pull request
-
-## License
-
-[Add your license information here]

@@ -6,16 +6,22 @@ from datetime import datetime
 from typing import Dict, List, Any
 from db_manager import DBManager
 from config import (
-    RABBITMQ_HOST, QUEUE_NAME, MAX_RETRIES, 
+    RABBITMQ_HOST, QUEUE_NAME, MAX_RETRIES,
     BASE_RETRY_DELAY, MAX_RETRY_DELAY, HEARTBEAT_INTERVAL
 )
+
+logger = logging.getLogger('coordinator')
 
 class Coordinator:
     """Manages task distribution and result processing"""
     def __init__(self):
-        self.db = DBManager()
-        self.active_nodes: Dict[str, datetime] = {}
-        self.setup_rabbitmq()
+        try:
+            self.db = DBManager()
+            self.active_nodes: Dict[str, datetime] = {}
+            self.setup_rabbitmq()
+        except Exception as e:
+            logger.error(f"Failed to initialize Coordinator: {e}")
+            raise
 
     def setup_rabbitmq(self) -> None:
         """Initialize RabbitMQ connection with retry logic"""
@@ -24,7 +30,7 @@ class Coordinator:
         )
         self.channel = self.connection.channel()
         self.channel.queue_declare(queue=QUEUE_NAME, durable=True)
-        logging.info("Connected to RabbitMQ")
+        logger.info("Connected to RabbitMQ")
 
     def check_node_health(self) -> None:
         """Remove inactive nodes"""
@@ -54,8 +60,11 @@ class Coordinator:
                     task_data["author_id"],
                     data.get("publications", [])
                 )
+                logging.info(f"Successfully processed publications for {task_data.get('author')}")
             elif status == "error":
                 self.handle_error(task_data, data.get("error"))
+                # Update last_crawl even on error to prevent continuous retries
+                self.db.update_last_crawl(task_data["author_id"])
 
         except Exception as e:
             logging.error(f"Error processing result: {e}")
@@ -84,44 +93,74 @@ class Coordinator:
         """Generate new crawling tasks"""
         tasks = []
         try:
+            # Only get authors that haven't been queued recently
             authors = self.db.get_authors_for_crawling()
+            
+            # Check if tasks are already in queue
+            method_frame = self.channel.basic_get(queue=QUEUE_NAME, auto_ack=False)
+            existing_tasks = set()
+            if method_frame:
+                # Put the message back
+                self.channel.basic_nack(method_frame[0].delivery_tag, requeue=True)
+                # Extract author_id from the message
+                try:
+                    msg = json.loads(method_frame[2])
+                    if isinstance(msg, dict):
+                        existing_tasks.add(msg.get('author_id'))
+                except:
+                    pass
+
             for author in authors:
-                task = {
-                    "author_id": author["author_id"],
-                    "url": author["url"],
-                    "author": author["author_name"],
-                    "source": author["source"],
-                    "status": "pending",
-                    "retry_count": 0,
-                    "created_at": datetime.now().isoformat()
-                }
-                tasks.append(task)
-                logging.info(f"Generated task for {author['author_name']}")
+                # Skip if already queued
+                if author['author_id'] not in existing_tasks:
+                    task = {
+                        "author_id": author["author_id"],
+                        "url": author["url"],
+                        "author": author["author_name"],
+                        "source": author["source"],
+                        "status": "pending",
+                        "retry_count": 0,
+                        "created_at": datetime.now().isoformat()
+                    }
+                    tasks.append(task)
+                    logging.info(f"Generated task for {author['author_name']}")
+                    
+                    # Mark as queued by updating last_crawl
+                    self.db.update_last_crawl(author['author_id'])
+            
         except Exception as e:
             logging.error(f"Error generating tasks: {e}")
         return tasks
 
-    def run(self) -> None:
-        """Main coordinator loop"""
-        try:
-            while True:
-                self.check_node_health()
-                
-                # Generate and publish new tasks
-                for task in self.generate_tasks():
-                    self.publish_task(task)
-                
-                # Process results
-                method_frame, _, body = self.channel.basic_get(
-                    queue=QUEUE_NAME,
-                    auto_ack=True
-                )
-                
-                if method_frame:
-                    self.process_result(json.loads(body))
 
-        except KeyboardInterrupt:
-            logging.info("Coordinator shutting down...")
-        finally:
+    
+    def run_once(self) -> None:
+        """Run one iteration of the coordinator loop"""
+        try:
+            self.check_node_health()
+            
+            # Generate and publish new tasks
+            for task in self.generate_tasks():
+                self.publish_task(task)
+            
+            # Process results
+            method_frame, _, body = self.channel.basic_get(
+                queue=QUEUE_NAME,
+                auto_ack=True
+            )
+            
+            if method_frame:
+                self.process_result(json.loads(body))
+                
+        except Exception as e:
+            logging.error(f"Error in coordinator loop: {e}")
+
+    
+    def cleanup(self) -> None:
+        """Cleanup resources"""
+        try:
             if self.connection and not self.connection.is_closed:
                 self.connection.close()
+                logging.info("Coordinator: RabbitMQ connection closed")
+        except Exception as e:
+            logging.error(f"Error during coordinator cleanup: {e}")

@@ -20,20 +20,24 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO publication_user;
 
+DROP TABLE IF EXISTS authors CASCADE;
 -- Create tables as the owner (postgres)
 CREATE TABLE authors (
     author_id SERIAL PRIMARY KEY,
     author_name TEXT NOT NULL,
     source TEXT NOT NULL,
+    url TEXT NOT NULL,  -- Added URL column
     last_crawl TIMESTAMP DEFAULT NULL,
-    UNIQUE(author_name, source)  -- Added unique constraint
+    UNIQUE(author_name, source)
 );
 
+
+DROP TABLE IF EXISTS publications CASCADE;
 CREATE TABLE publications (
     publication_id SERIAL PRIMARY KEY,
     author_id INTEGER NOT NULL REFERENCES authors(author_id) ON DELETE CASCADE,
     title TEXT NOT NULL,
-    year INTEGER CHECK (year >= 0), -- Ensure valid years
+    year INTEGER CHECK (year >= 0),
     source TEXT NOT NULL
 );
 
