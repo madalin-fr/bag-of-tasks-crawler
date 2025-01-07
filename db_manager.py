@@ -1,5 +1,5 @@
-# db_manager.py
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 import logging
 from typing import List, Dict, Any
@@ -29,7 +29,7 @@ class DBManager:
                 conn.execute(text("SELECT 1"))
             self.initialized = True
             logging.info("Database connection initialized successfully")
-        except Exception as e:
+        except SQLAlchemyError as e:
             logging.error(f"Failed to initialize database: {e}")
             raise
 
@@ -49,7 +49,7 @@ class DBManager:
             conn = self.engine.connect()
             yield conn
             conn.commit()
-        except Exception as e:
+        except SQLAlchemyError as e:
             if conn:
                 conn.rollback()
             logging.error(f"Database operation failed: {e}")
@@ -80,7 +80,7 @@ class DBManager:
                     "dblp_interval": DBLP_INTERVAL
                 })
                 
-                return [
+                authors =  [
                     {
                         "author_id": row.author_id,
                         "author_name": row.author_name,
@@ -90,37 +90,53 @@ class DBManager:
                     }
                     for row in result
                 ]
-        except Exception as e:
+
+                logging.info(f"Found {len(authors)} authors to crawl: {[author['author_name'] for author in authors]}")
+                return authors
+
+        except SQLAlchemyError as e:
             logging.error(f"Error getting authors for crawling: {e}")
             return []
     
     def update_publications(self, author_id: int, publications: List[Dict[str, Any]]) -> None:
-        """Update author's publications in a single transaction"""
+        """Update author's publications in a single transaction using bulk insert"""
+        logging.info(f"DBManager: Attempting to update publications for author ID: {author_id}")  # Added logging
+        logging.info(f"DBManager: Received publications: {publications}")  # Added logging
         try:
             with self.get_connection() as conn:
-                # Update last crawl time
                 self.update_last_crawl(author_id)
-                
-                # Insert/update publications
-                insert_query = text("""
-                    INSERT INTO publications (author_id, title, year, source)
-                    VALUES (:author_id, :title, :year, :source)
-                    ON CONFLICT (author_id, title) DO UPDATE
-                    SET year = EXCLUDED.year, 
-                        updated_at = NOW()
-                """)
-                
-                for pub in publications:
-                    try:
-                        conn.execute(insert_query, {
+                logging.info(f"Inserting publications for author {author_id}: {publications}")
+
+                if publications:  # Only insert if there are publications
+                    # Prepare data for bulk insert
+                    pub_data = [
+                        {
                             "author_id": author_id,
                             "title": pub["title"],
                             "year": pub.get("year"),
                             "source": pub.get("source", "unknown")
-                        })
-                    except Exception as e:
-                        logging.error(f"Error saving publication: {e}")
-        except Exception as e:
+                        }
+                        for pub in publications
+                    ]
+
+                    # Bulk insert with ON CONFLICT clause
+                    insert_query = text("""
+                        INSERT INTO publications (author_id, title, year, source)
+                        VALUES (:author_id, :title, :year, :source)
+                        ON CONFLICT (author_id, title) DO UPDATE
+                        SET year = EXCLUDED.year, 
+                            updated_at = NOW()
+                    """)
+
+                    try:
+                        conn.execute(insert_query, pub_data)
+                    except SQLAlchemyError as e:
+                        logging.error(f"DBManager: Error during execute: {e}")
+                        logging.error(f"DBManager: Query: {insert_query}")
+                        logging.error(f"DBManager: Data: {pub_data}")
+                        raise  # Re-raise after logging
+
+        except SQLAlchemyError as e:
             logging.error(f"Error updating publications: {e}")
             raise
 
@@ -135,6 +151,6 @@ class DBManager:
                 """)
                 conn.execute(update_query, {"author_id": author_id})
                 logging.info(f"Updated last_crawl for author {author_id}")
-        except Exception as e:
+        except SQLAlchemyError as e:
             logging.error(f"Error updating last_crawl: {e}")
             raise

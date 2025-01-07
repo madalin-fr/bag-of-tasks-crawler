@@ -1,4 +1,3 @@
-#diagnostics.py
 import psycopg2
 import logging
 from datetime import datetime
@@ -34,7 +33,9 @@ def run_diagnostics():
                 INSERT INTO authors (author_name, source, url)
                 VALUES 
                 ('Ciprian Dobre', 'dblp', 'https://dblp.uni-trier.de/pers/hd/d/Dobre:Ciprian'),
-                ('Ciprian Dobre', 'google', 'https://scholar.google.ro/citations?user=_44USrIAAAAJ')
+                ('Ciprian Dobre', 'google', 'https://scholar.google.ro/citations?user=_44USrIAAAAJ'),
+                ('Geoffrey Hinton', 'google', 'https://scholar.google.com/citations?user=JicYPdAAAAAJ'),
+                ('Yann LeCun', 'google', 'https://scholar.google.com/citations?user=WLN3QrAAAAAJ')
                 ON CONFLICT (author_name, source) DO NOTHING
                 RETURNING author_id;
             """)
@@ -57,8 +58,10 @@ def run_diagnostics():
         crawl_status = cur.fetchall()
         for author in crawl_status:
             print(f"Author: {author[0]}, Source: {author[1]}, Last Crawl: {author[2]}")
+
+        
             
-    except Exception as e:
+    except psycopg2.Error as e:
         print(f"Database Error: {e}")
     finally:
         if 'conn' in locals():
@@ -76,10 +79,27 @@ def run_diagnostics():
         
         connection.close()
         print("RabbitMQ connection successful")
-    except Exception as e:
+    except pika.exceptions.AMQPConnectionError as e:
         print(f"RabbitMQ Error: {e}")
 
+    print("\nChecking crawler configuration...")
+    try:
+        with psycopg2.connect("dbname=publication_db user=publication_user password=project host=localhost") as conn:
+            with conn.cursor() as cur:
+                # Verify author URL
+                cur.execute("SELECT url FROM authors WHERE author_name = 'Ciprian Dobre'")
+                url = cur.fetchone()[0]
+                print(f"Author URL: {url}")
+                
+                # Test URL accessibility
+                headers = {'User-Agent': USER_AGENTS[0]}
+                response = requests.get(url, headers=headers, timeout=10)
+                print(f"URL Status Code: {response.status_code}")
+    except Exception as e:
+        print(f"Error: {e}")
+
     print("\n=== Diagnostic Complete ===")
+
 
 
 def debug_crawl_detailed():
@@ -93,7 +113,7 @@ def debug_crawl_detailed():
         
         # Sample multiple messages
         messages = []
-        for _ in range(3):  # Check 3 messages
+        for _ in range(15):  # Check 15 messages
             method_frame, _, body = channel.basic_get('crawl_queue', auto_ack=False)
             if method_frame:
                 messages.append(json.loads(body))
@@ -159,8 +179,6 @@ def debug_crawl_detailed():
         print(f"Error accessing RabbitMQ: {e}")
     
     print("\n=== Enhanced Debug Session Complete ===")
-
-
 
 if __name__ == "__main__":
     run_diagnostics()

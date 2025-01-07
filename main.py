@@ -31,8 +31,8 @@ def run_coordinator(shutdown_flag: threading.Event) -> None:
     coordinator = Coordinator()
     try:
         while not shutdown_flag.is_set():
-            coordinator.run_once()  # Modified to run one iteration
-            time.sleep(1)
+            coordinator.run_once()
+            time.sleep(5)  # Increased sleep time
     except Exception as e:
         logging.error(f"Coordinator error: {e}")
     finally:
@@ -44,8 +44,8 @@ def run_crawler(shutdown_flag: threading.Event) -> None:
     crawler = Crawler()
     try:
         while not shutdown_flag.is_set():
-            crawler.run_once()  # Modified to run one iteration
-            time.sleep(1)
+            crawler.run_once()
+            time.sleep(5)  # Increased sleep time
     except Exception as e:
         logging.error(f"Crawler error: {e}")
     finally:
@@ -72,7 +72,7 @@ def main() -> None:
         crawler_thread.daemon = True
         crawler_threads.append(crawler_thread)
         crawler_thread.start()
-        time.sleep(1)  # Stagger crawler starts
+        time.sleep(5)  # Stagger crawler starts
     
     try:
         # Keep main thread alive and handle shutdown
