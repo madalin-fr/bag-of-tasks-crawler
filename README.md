@@ -1,0 +1,197 @@
+# Academic Publication Crawler
+
+A distributed web crawling system designed to collect publication data from Google Scholar and DBLP. The system uses a coordinator-worker architecture with RabbitMQ for task distribution and PostgreSQL for data storage.
+
+## Architecture Overview
+
+The system consists of several key components:
+
+1. **Coordinator**: Manages task distribution and result processing
+2. **Crawler Nodes**: Worker processes that perform the actual web crawling
+3. **Proxy Manager**: Handles proxy rotation and IP blocking prevention
+4. **Database Manager**: Manages PostgreSQL database operations
+5. **RabbitMQ**: Message queue for task distribution
+
+## Prerequisites
+
+- Python 3.8+
+- PostgreSQL 12+
+- RabbitMQ 3.8+
+- Required Python packages (see Installation section)
+
+## Installation
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd academic-publication-crawler
+```
+
+2. Create and activate a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install required packages:
+```bash
+pip install -r requirements.txt
+```
+
+4. Set up PostgreSQL database:
+```bash
+# Log into PostgreSQL as superuser
+psql -U postgres
+
+# Run the setup script
+\i setup_db.sql
+```
+
+5. Set up RabbitMQ:
+```bash
+# Install RabbitMQ (Ubuntu/Debian)
+sudo apt-get install rabbitmq-server
+
+# Start RabbitMQ service
+sudo systemctl start rabbitmq-server
+```
+
+6. Configure proxy list:
+Create a file named `ips.txt` in the project root with your proxy list in the following format:
+```
+ip:port
+ip:port:username:password
+```
+
+## Configuration
+
+The system can be configured through environment variables or by modifying `config.py`. Key configuration options include:
+
+```python
+# RabbitMQ Configuration
+RABBITMQ_HOST = 'localhost'
+QUEUE_NAME = 'crawl_queue'
+
+# Database Configuration
+DB_USER = 'publication_user'
+DB_PASS = 'project'
+DB_HOST = 'localhost'
+DB_NAME = 'publication_db'
+
+# Crawler Configuration
+MAX_RETRIES = 3
+NUM_CRAWLERS = 3
+```
+
+## Usage
+
+1. Start the system:
+```bash
+python main.py
+```
+
+This will start:
+- 1 coordinator process
+- 3 crawler nodes (configurable via NUM_CRAWLERS)
+- RabbitMQ message queue
+- Database connection pool
+
+2. Adding authors to crawl:
+
+Insert authors into the database using SQL:
+```sql
+INSERT INTO authors (author_name, source, url) VALUES 
+('John Doe', 'google', 'https://scholar.google.com/citations?user=xxx'),
+('Jane Smith', 'dblp', 'https://dblp.org/pid/xxx');
+```
+
+3. Monitor the system:
+
+Check crawling status:
+```sql
+SELECT author_name, source, last_crawl
+FROM authors
+ORDER BY last_crawl DESC;
+```
+
+Check publication counts:
+```sql
+SELECT a.author_name, COUNT(p.publication_id) as pub_count
+FROM authors a
+LEFT JOIN publications p ON a.author_id = p.author_id
+GROUP BY a.author_name;
+```
+
+## System Features
+
+### Fault Tolerance
+- Automatic retry mechanism for failed tasks
+- Proxy rotation to prevent IP blocking
+- Heartbeat monitoring of crawler nodes
+- Transaction-safe database operations
+
+### Rate Limiting
+- Configurable delays between requests
+- IP-based rate limiting
+- Automatic IP blocking detection
+
+### Scalability
+- Multiple crawler nodes can run simultaneously
+- Distributed task queue using RabbitMQ
+- Connection pooling for database operations
+
+## Monitoring and Maintenance
+
+### Logging
+The system logs important events to both console and `crawler.log`:
+```bash
+tail -f crawler.log
+```
+
+### Database Maintenance
+Regular maintenance tasks:
+```sql
+-- Clean up old data
+DELETE FROM publications WHERE updated_at < NOW() - INTERVAL '1 year';
+
+-- Vacuum the database
+VACUUM ANALYZE authors, publications;
+```
+
+### RabbitMQ Monitoring
+Monitor the RabbitMQ queue:
+```bash
+# View queue status
+rabbitmqctl list_queues
+
+# View connections
+rabbitmqctl list_connections
+```
+
+## Troubleshooting
+
+1. **Connection Issues**
+   - Check if RabbitMQ service is running
+   - Verify database credentials and connection
+   - Ensure proxy list is properly formatted
+
+2. **Crawling Issues**
+   - Check for IP blocking in logs
+   - Verify proxy list is valid and accessible
+   - Ensure target URLs are correctly formatted
+
+3. **Performance Issues**
+   - Monitor database indexes
+   - Check RabbitMQ queue size
+   - Adjust number of crawler nodes
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+[Add your license information here]

@@ -1,0 +1,88 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# OS-generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / Packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.so
+*.pyd
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb-checkpoint*
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Spyder
+.spyder-py3/
+
+# Vim
+*.swp
+*.swo
+.*.sw[a-z]
+
+# Mac
+.DS_Store
+
+# Byte-compiled / optimized / DLL files
+*.pyc
+*.so
+*.pyd
+
+# Cython
+*.c
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Local configuration
+.env
+.env.*
+*.env
+*.env.*
+secrets.ini
+
+# MkDocs
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
